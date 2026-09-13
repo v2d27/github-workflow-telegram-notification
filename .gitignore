@@ -7,6 +7,8 @@
 *.dll
 *.so
 *.dylib
+build/
+
 
 # Test binary, built with `go test -c`
 *.test
@@ -26,7 +28,15 @@ go.work.sum
 
 # env file
 .env
+.dev.vars
 
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Cloudflare Worker build/tooling
+node_modules/
+build/
+.wrangler/
+.tools/
+

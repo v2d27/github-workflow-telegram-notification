@@ -1,0 +1,51 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: main
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install npm dependencies
+        run: npm ci # also vendors TinyGo into ./.tools via the postinstall script
+
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply github-workflow-telegram-notification --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy worker
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Sync worker secrets
+        run: |
+          printf '%s' "${{ secrets.WEBHOOK_SECRET_GITHUB }}" | npx wrangler secret put WEBHOOK_SECRET_GITHUB
+          printf '%s' "${{ secrets.TELEGRAM_BOT_TOKEN }}" | npx wrangler secret put TELEGRAM_BOT_TOKEN
+          printf '%s' "${{ secrets.TELEGRAM_CHAT_ID }}" | npx wrangler secret put TELEGRAM_CHAT_ID
+          printf '%s' "${{ secrets.GITHUB_APP_ID }}" | npx wrangler secret put GITHUB_APP_ID
+          printf '%s' "${{ secrets.GITHUB_APP_INSTALLATION_ID }}" | npx wrangler secret put GITHUB_APP_INSTALLATION_ID
+          printf '%s' "${{ secrets.GITHUB_APP_PRIVATE_KEY }}" | npx wrangler secret put GITHUB_APP_PRIVATE_KEY
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

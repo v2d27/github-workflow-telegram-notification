@@ -1,0 +1,17 @@
+{
+  "name": "github-workflow-telegram-notification",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "bash scripts/install-tinygo.sh",
+    "build": "go run github.com/syumai/workers-go/cmd/workers-assets-gen && PATH=\"$PWD/.tools/tinygo/bin:$PATH\" tinygo build -o ./build/app.wasm -target wasm -no-debug ./...",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrations:local": "wrangler d1 migrations apply github-workflow-telegram-notification --local",
+    "db:migrations:remote": "wrangler d1 migrations apply github-workflow-telegram-notification --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.131.1"
+  }
+}

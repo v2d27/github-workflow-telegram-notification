@@ -1,0 +1,22 @@
+name = "github-workflow-telegram-notification"
+main = "./build/worker.mjs"
+compatibility_date = "2026-09-13"
+
+[build]
+command = "npm run build"
+
+[[d1_databases]]
+binding = "DB" # accessed in Go as sql.Open("d1", "DB")
+database_name = "github-workflow-telegram-notification"
+database_id = "16a90101-7aa4-4c4b-95af-f2c41398788e"
+
+[[queues.producers]]
+queue = "github-workflow-telegram-notification"
+binding = "QUEUE" # accessed in Go as queues.NewProducer("QUEUE")
+
+[[queues.consumers]]
+queue = "github-workflow-telegram-notification"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "github-workflow-telegram-notification-dlq"
