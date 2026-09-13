@@ -1,217 +1,207 @@
-Với kiến trúc **GitHub App + Cloudflare Worker + D1 + Queue + Telegram**, sequence diagram dạng text như sau:
+# Infrastructure overview
 
-use go language
+Architecture: **GitHub App + Cloudflare Worker + D1 + Cloudflare Queue + Telegram**.
+
+The diagrams below walk through the pipeline stage by stage, then show the full end-to-end
+sequence, followed by the failure/retry and duplicate-webhook cases.
+
+## 1. Webhook delivery
 
 ```text
-Developer        GitHub Actions       GitHub App        Cloudflare Worker
-    │                  │                  │                    │
-    │  git push        │                  │                    │
-    ├─────────────────>│                  │                    │
-    │                  │                  │                    │
-    │                  │ Workflow runs    │                    │
-    │                  ├──────────────────┤                    │
-    │                  │                  │                    │
-    │                  │ Workflow         │                    │
-    │                  │ completed        │                    │
-    │                  │                  │                    │
-    │                  │  workflow_run    │                    │
-    │                  │  completed       │                    │
-    │                  ├─────────────────>│                    │
-    │                  │                  │                    │
-    │                  │                  │ POST webhook        │
-    │                  │                  │ X-Hub-Signature-256 │
-    │                  │                  ├───────────────────>│
-    │                  │                  │                    │
-    │                  │                  │                    │ Verify HMAC
-    │                  │                  │                    │
-    │                  │                  │                    │ Check
-    │                  │                  │                    │ delivery_id
-    │                  │                  │                    │
+Developer          GitHub Actions        GitHub App         Cloudflare Worker
+    │                     │                    │                     │
+    │ git push            │                    │                     │
+    ├────────────────────>│                    │                     │
+    │                     │                    │                     │
+    │                     │ workflow runs      │                     │
+    │                     │ (build/test/...)   │                     │
+    │                     │                    │                     │
+    │                     │ workflow_run:      │                     │
+    │                     │ completed          │                     │
+    │                     ├───────────────────>│                     │
+    │                     │                    │                     │
+    │                     │                    │ POST /webhooks/github
+    │                     │                    │ X-Hub-Signature-256 │
+    │                     │                    │ X-GitHub-Delivery   │
+    │                     │                    ├────────────────────>│
+    │                     │                    │                     │
+    │                     │                    │                     │ verify HMAC
+    │                     │                    │                     │ signature
+    │                     │                    │                     │
+    │                     │                    │                     │ check
+    │                     │                    │                     │ delivery_id (D1)
 ```
 
-### Tiếp theo: D1 + Queue
+## 2. Persist + enqueue
 
 ```text
 Cloudflare Worker        D1 Database          Cloudflare Queue
        │                      │                      │
        │ INSERT delivery      │                      │
-       │ status = pending     │                      │
+       │ (status = pending)   │                      │
        ├─────────────────────>│                      │
        │                      │                      │
-       │ Queue.send(event)    │                      │
-       ├────────────────────────────────────────────>│
+       │ queue.send(event)    │                      │
+       ├─────────────────────────────────────────────>│
        │                      │                      │
-       │ HTTP 200             │                      │
-       ├──────────────────────┐                      │
+       │<─────────────────────────────────────────────┤
+       │ (enqueued)           │                      │
        │                      │                      │
-       │<─────────────────────┘                      │
-       │                                             │
-       │                                             │
-       │                         Queue Consumer      │
-       │                              │              │
-       │                              │ receive      │
-       │                              │<─────────────┤
-       │                              │              │
-       │                              │ Parse        │
-       │                              │ workflow_run │
-       │                              │              │
-       │                              ▼              │
-       │                         D1 Database         │
-       │                              │              │
-       │                              │ store run    │
-       │                              │              │
+       │ HTTP 200 to GitHub   │                      │
+       ▼                      │                      │
 ```
 
-### Gửi notification Telegram
+## 3. Queue consumer stores the run
 
 ```text
-Queue Consumer       D1 Database          Telegram
-      │                    │                  │
-      │ Save workflow run  │                  │
-      ├───────────────────>│                  │
-      │                    │                  │
-      │                    │                  │
-      │ POST Telegram Webhook                  │
-      ├──────────────────────────────────────>│
-      │                    │                  │
-      │                    │       204        │
-      │<──────────────────────────────────────┤
-      │                    │                  │
-      │ UPDATE delivery   │                  │
-      │ status=delivered  │                  │
-      ├───────────────────>│                  │
-      │                    │                  │
-      ▼                    ▼                  ▼
+Cloudflare Queue        Queue Consumer          D1 Database
+       │                      │                      │
+       │ deliver message      │                      │
+       ├─────────────────────>│                      │
+       │                      │                      │
+       │                      │ parse workflow_run    │
+       │                      │                      │
+       │                      │ store run             │
+       │                      ├─────────────────────>│
+```
+
+## 4. Send the Telegram notification
+
+```text
+Queue Consumer          D1 Database             Telegram
+      │                       │                      │
+      │ POST sendMessage                              │
+      ├───────────────────────────────────────────────>│
+      │                       │                      │
+      │<───────────────────────────────────────────────┤
+      │ 2xx                   │                      │
+      │                       │                      │
+      │ UPDATE delivery       │                      │
+      │ (status = delivered)  │                      │
+      ├──────────────────────>│                      │
 ```
 
 ## Full sequence
 
 ```text
-┌──────────┐
-│ Developer│
-└────┬─────┘
-     │ git push
-     ▼
+┌───────────┐
+│ Developer │
+└─────┬─────┘
+      │ git push
+      ▼
 ┌─────────────────┐
-│ GitHub Actions  │
-└────┬────────────┘
-     │
-     │ workflow_run: completed
-     ▼
+│ GitHub Actions   │
+└─────┬────────────┘
+      │ workflow_run: completed
+      ▼
 ┌─────────────────┐
-│   GitHub App    │
-│    Webhook      │
-└────┬────────────┘
-     │
-     │ POST /webhooks/github
-     │ X-Hub-Signature-256
-     │ X-GitHub-Delivery
-     ▼
-┌─────────────────────────┐
-│    Cloudflare Worker    │
-│                         │
-│  1. Verify signature    │
-│  2. Check event type    │
-│  3. Check delivery_id   │
-└───────────┬─────────────┘
-            │
-            ├───────────────────────┐
-            │                       │
-            ▼                       ▼
-      ┌───────────┐          ┌──────────────┐
-      │    D1     │          │ Cloudflare   │
-      │           │          │    Queue     │
-      │ idempotency│          │              │
-      │ + history │          │ workflow_run │
-      └───────────┘          └──────┬───────┘
-                                    │
-                                    ▼
-                           ┌──────────────────┐
-                           │ Queue Consumer   │
-                           │     Worker       │
-                           └────────┬─────────┘
-                                    │
-                  ┌─────────────────┴─────────────────┐
-                  │                                   │
-                  ▼                                   ▼
-             ┌─────────┐                       ┌──────────┐
-             │   D1    │                       │ Telegram  │
-             │         │                       │ Webhook  │
-             │workflow │                       └────┬─────┘
-             │  runs   │                            │
-             └─────────┘                            │
-                                                    ▼
-                                           ┌─────────────────┐
-                                           │ Telegram Channel │
-                                           │                 │
-                                           │ ✅ SUCCESS      │
-                                           │ ❌ FAILURE      │
-                                           └─────────────────┘
+│   GitHub App     │
+│    webhook       │
+└─────┬────────────┘
+      │ POST /webhooks/github
+      │ X-Hub-Signature-256
+      │ X-GitHub-Delivery
+      ▼
+┌──────────────────────────┐
+│    Cloudflare Worker      │
+│                          │
+│ 1. verify signature      │
+│ 2. check event type      │
+│ 3. check delivery_id     │
+└─────────────┬─────────────┘
+              │
+      ┌───────┴────────┐
+      ▼                ▼
+┌───────────┐    ┌───────────────┐
+│    D1     │    │ Cloudflare    │
+│           │    │ Queue         │
+│ idempotency│    │               │
+│ + history │    │ workflow_run  │
+└───────────┘    └───────┬───────┘
+                          ▼
+                 ┌──────────────────┐
+                 │  Queue Consumer   │
+                 └─────────┬─────────┘
+                           │
+                 ┌─────────┴─────────┐
+                 ▼                   ▼
+           ┌───────────┐      ┌──────────────┐
+           │    D1      │      │  Telegram    │
+           │            │      │  Bot API     │
+           │ workflow_  │      └──────┬───────┘
+           │ runs       │             │
+           └───────────┘             ▼
+                             ┌──────────────────┐
+                             │ Telegram chat     │
+                             │                  │
+                             │ ✅ SUCCESS       │
+                             │ ❌ FAILURE       │
+                             └──────────────────┘
 ```
 
-### Failure / retry
+## Failure / retry
 
 ```text
 Queue Consumer
       │
       │ POST Telegram
       ▼
-  ┌─────────┐
-  │ Telegram │
-  └────┬────┘
-       │
+  ┌──────────┐
+  │ Telegram  │
+  └────┬─────┘
        │ 5xx / timeout
        ▼
 ┌──────────────────┐
-│ Queue message    │
-│ fails            │
-└────────┬─────────┘
-         │
-         │ automatic retry
-         ▼
+│ msg.Retry()       │
+└─────────┬─────────┘
+          │ automatic redelivery
+          ▼
 ┌──────────────────┐
-│ Queue Consumer   │
-│ retry #1         │
-└────────┬─────────┘
-         │
-         ├── success ──> D1: delivered
-         │
-         └── fail
-              │
-              ▼
-         retry #2 ...
-              │
-              ▼
-         max retries
-              │
-              ▼
-             DLQ
+│ Queue Consumer    │
+│ retry #1          │
+└─────────┬─────────┘
+          │
+          ├── success ──> D1: status = delivered
+          │
+          └── fail
+               │
+               ▼
+          retry #2 ...
+               │
+               ▼
+          max retries exceeded
+               │
+               ▼
+              DLQ
 ```
 
-### Duplicate webhook
+## Duplicate webhook
 
-GitHub có thể gửi lại webhook, nên `X-GitHub-Delivery` rất quan trọng:
+GitHub may redeliver the same webhook (e.g. after a timeout on its side), so the
+`X-GitHub-Delivery` header is what makes the pipeline idempotent:
 
 ```text
 GitHub
   │
   │ delivery_id = abc-123
   ▼
-Worker
+Cloudflare Worker
   │
   ▼
-D1
-  │
-  │ SELECT delivery_id = abc-123
+D1: INSERT delivery (delivery_id = abc-123)
+  │      ON CONFLICT (delivery_id) DO NOTHING
   ▼
-Already exists
+RowsAffected() == 0 → already exists
   │
-  ├──────────────> HTTP 200
+  ├──────────────> HTTP 200 to GitHub
   │
-  └── DO NOT send Telegram
+  └── do not enqueue / do not notify Telegram
 ```
 
-**Điểm quan trọng:** Worker **không cần gọi GitHub API** để biết Success/Failure. Payload `workflow_run` đã chứa:
+## Key point: no GitHub API call needed for basic status
+
+The Worker does **not** need to call the GitHub API to know whether a run succeeded or failed —
+the `workflow_run` webhook payload already carries that:
 
 ```text
 workflow_run.conclusion
@@ -225,7 +215,12 @@ workflow_run.created_at
 workflow_run.updated_at
 ```
 
-Vì vậy flow production mình khuyến nghị là:
+The GitHub REST API is only called afterwards, best-effort, to enrich the message with detail the
+webhook payload doesn't carry: which jobs/steps failed, and the GitHub identities of the commit
+author / PR requester / merger. If that call fails, the notification still goes out using only the
+fields above.
+
+## Why go through D1 + Queue instead of calling Telegram directly
 
 ```text
 GitHub Actions
@@ -234,7 +229,7 @@ GitHub App
       ↓
 Cloudflare Worker
       ↓
-    D1 ─── idempotency/history
+     D1 ── idempotency / history
       ↓
 Cloudflare Queue
       ↓
@@ -243,4 +238,6 @@ Queue Consumer
    Telegram
 ```
 
-Cách này tốt hơn việc Worker gọi Telegram trực tiếp vì **Telegram chậm/down sẽ không làm GitHub webhook request thất bại**, và Queue có cơ chế retry.
+This is better than having the Worker call Telegram directly from the webhook handler: if Telegram
+is slow or down, that doesn't fail the GitHub webhook delivery itself, and the Queue's built-in
+retry mechanism handles the eventual delivery.
