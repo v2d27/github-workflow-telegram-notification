@@ -5,6 +5,12 @@ compatibility_date = "2026-09-13"
 [build]
 command = "npm run build"
 
+[vars]
+# Square size (pixels) requested for the commit/PR owner's avatar photo sent
+# to Telegram, via the "s" query param GitHub's avatar service (and
+# Gravatar) honor. Read in main.go with cloudflare.Getenv("AVATAR_SIZE").
+AVATAR_SIZE = "128"
+
 [[d1_databases]]
 binding = "DB" # accessed in Go as sql.Open("d1", "DB")
 database_name = "github-workflow-telegram-notification"

@@ -16,10 +16,12 @@ const (
 // FormatWorkflowRun renders a workflow_run event as a 4-6 line HTML-formatted
 // Telegram message (see ParseMode in client.go), plus the avatar URL of
 // whoever owns the run (the PR requester, or the commit author if there's no
-// associated PR) for use as a photo attachment. details may be nil if the
-// GitHub API enrichment call failed; the message (and avatar) degrade
-// gracefully in that case rather than blocking the notification.
-func FormatWorkflowRun(repository string, run ghevents.WorkflowRun, sender ghevents.Actor, details *ghevents.RunDetails) (text, avatarURL string) {
+// associated PR) for use as a photo attachment, resized to avatarSize
+// (see ghevents.RunDetails.OwnerAvatarURL; avatarSize <= 0 leaves it
+// full-size). details may be nil if the GitHub API enrichment call failed;
+// the message (and avatar) degrade gracefully in that case rather than
+// blocking the notification.
+func FormatWorkflowRun(repository string, run ghevents.WorkflowRun, sender ghevents.Actor, details *ghevents.RunDetails, avatarSize int) (text, avatarURL string) {
 	var lines []string
 
 	lines = append(lines, fmt.Sprintf(
@@ -49,7 +51,7 @@ func FormatWorkflowRun(repository string, run ghevents.WorkflowRun, sender gheve
 		changesURL(repository, run.HeadSHA, details),
 	))
 
-	return strings.Join(lines, "\n"), details.OwnerAvatarURL()
+	return strings.Join(lines, "\n"), details.OwnerAvatarURL(avatarSize)
 }
 
 // changesURL points at the most useful diff view: the PR's "Files changed"

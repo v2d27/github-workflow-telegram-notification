@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/syumai/workers-go/cloudflare/fetch"
 )
@@ -47,15 +49,30 @@ type RunDetails struct {
 
 // OwnerAvatarURL returns the avatar of whoever "owns" this run: the PR
 // requester when the commit belongs to a pull request, otherwise the
-// commit author.
-func (d *RunDetails) OwnerAvatarURL() string {
+// commit author. size requests a resized square image via the "s" query
+// parameter honored by both GitHub's avatar service and Gravatar (the
+// fallback for accounts without a GitHub-hosted avatar); size <= 0 leaves
+// the URL unmodified.
+func (d *RunDetails) OwnerAvatarURL(size int) string {
 	if d == nil {
 		return ""
 	}
+	raw := d.CommitAuthorAvatarURL
 	if d.PRNumber > 0 && d.PRRequesterAvatarURL != "" {
-		return d.PRRequesterAvatarURL
+		raw = d.PRRequesterAvatarURL
 	}
-	return d.CommitAuthorAvatarURL
+	if raw == "" || size <= 0 {
+		return raw
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	q.Set("s", strconv.Itoa(size))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 type FailedJob struct {

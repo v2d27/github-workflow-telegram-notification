@@ -17,13 +17,17 @@ import (
 )
 
 type Consumer struct {
-	store    *store.Store
-	telegram *telegram.Client
-	github   *ghevents.AppClient
+	store      *store.Store
+	telegram   *telegram.Client
+	github     *ghevents.AppClient
+	avatarSize int
 }
 
-func NewConsumer(st *store.Store, tg *telegram.Client, gh *ghevents.AppClient) *Consumer {
-	return &Consumer{store: st, telegram: tg, github: gh}
+// NewConsumer wires up the queue consumer. avatarSize resizes the commit/PR
+// owner's avatar photo (0 or negative sends it full-size) — see
+// ghevents.RunDetails.OwnerAvatarURL.
+func NewConsumer(st *store.Store, tg *telegram.Client, gh *ghevents.AppClient, avatarSize int) *Consumer {
+	return &Consumer{store: st, telegram: tg, github: gh, avatarSize: avatarSize}
 }
 
 // HandleBatch processes every message individually: each message is acked
@@ -84,7 +88,7 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *queues.Message) error
 		details = nil
 	}
 
-	text, avatarURL := telegram.FormatWorkflowRun(event.Repository.FullName, event.WorkflowRun, event.Sender, details)
+	text, avatarURL := telegram.FormatWorkflowRun(event.Repository.FullName, event.WorkflowRun, event.Sender, details, c.avatarSize)
 	if err := c.send(ctx, text, avatarURL); err != nil {
 		if markErr := c.store.MarkFailed(ctx, envelope.DeliveryID, err.Error()); markErr != nil {
 			log.Printf("notifier: failed to mark delivery %s failed: %v", envelope.DeliveryID, markErr)
