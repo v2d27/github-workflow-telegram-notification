@@ -84,8 +84,8 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *queues.Message) error
 		details = nil
 	}
 
-	text := telegram.FormatWorkflowRun(event.Repository.FullName, event.WorkflowRun, event.Sender, details)
-	if err := c.telegram.SendMessage(ctx, text); err != nil {
+	text, avatarURL := telegram.FormatWorkflowRun(event.Repository.FullName, event.WorkflowRun, event.Sender, details)
+	if err := c.send(ctx, text, avatarURL); err != nil {
 		if markErr := c.store.MarkFailed(ctx, envelope.DeliveryID, err.Error()); markErr != nil {
 			log.Printf("notifier: failed to mark delivery %s failed: %v", envelope.DeliveryID, markErr)
 		}
@@ -93,4 +93,20 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *queues.Message) error
 	}
 
 	return c.store.MarkDelivered(ctx, envelope.DeliveryID)
+}
+
+// send attaches the run owner's avatar as a photo when one was found and the
+// caption fits Telegram's (much smaller than a text message's) length limit
+// for photo captions. It falls back to a plain text message otherwise, or if
+// the photo send itself fails — an unreachable avatar shouldn't block or
+// endlessly retry a notification that would otherwise be ready to send.
+func (c *Consumer) send(ctx context.Context, text, avatarURL string) error {
+	if avatarURL != "" && len(text) <= telegram.MaxCaptionLength {
+		if err := c.telegram.SendPhoto(ctx, avatarURL, text); err != nil {
+			log.Printf("notifier: failed to send photo notification, falling back to text: %v", err)
+		} else {
+			return nil
+		}
+	}
+	return c.telegram.SendMessage(ctx, text)
 }

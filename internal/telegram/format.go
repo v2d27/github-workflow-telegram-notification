@@ -14,10 +14,12 @@ const (
 )
 
 // FormatWorkflowRun renders a workflow_run event as a 4-6 line HTML-formatted
-// Telegram message (see ParseMode in client.go). details may be nil if the
-// GitHub API enrichment call failed; the message degrades gracefully in
-// that case rather than blocking the notification.
-func FormatWorkflowRun(repository string, run ghevents.WorkflowRun, sender ghevents.Actor, details *ghevents.RunDetails) string {
+// Telegram message (see ParseMode in client.go), plus the avatar URL of
+// whoever owns the run (the PR requester, or the commit author if there's no
+// associated PR) for use as a photo attachment. details may be nil if the
+// GitHub API enrichment call failed; the message (and avatar) degrade
+// gracefully in that case rather than blocking the notification.
+func FormatWorkflowRun(repository string, run ghevents.WorkflowRun, sender ghevents.Actor, details *ghevents.RunDetails) (text, avatarURL string) {
 	var lines []string
 
 	lines = append(lines, fmt.Sprintf(
@@ -47,7 +49,7 @@ func FormatWorkflowRun(repository string, run ghevents.WorkflowRun, sender gheve
 		changesURL(repository, run.HeadSHA, details),
 	))
 
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), details.OwnerAvatarURL()
 }
 
 // changesURL points at the most useful diff view: the PR's "Files changed"
@@ -75,7 +77,7 @@ func commitLine(repository string, run ghevents.WorkflowRun, details *ghevents.R
 	line := fmt.Sprintf(
 		`<b><a href="%s">%s</a></b> by %s`,
 		changesURL(repository, run.HeadSHA, details),
-		html.EscapeString(truncate(title, 72)),
+		html.EscapeString(title),
 		formatUser(authorLogin, run.HeadCommit.Author.Name),
 	)
 
@@ -96,14 +98,6 @@ func commitTitle(message string) string {
 		return message[:i]
 	}
 	return message
-}
-
-func truncate(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max-1]) + "…"
 }
 
 func failedJobsLine(details *ghevents.RunDetails) string {

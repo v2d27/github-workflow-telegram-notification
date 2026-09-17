@@ -34,13 +34,28 @@ func NewAppClient(appID, installationID, privateKeyPEM string) *AppClient {
 // RunDetails enriches a workflow_run event with data only available from
 // the GitHub REST API.
 type RunDetails struct {
-	FailedJobs        []FailedJob
-	CommitAuthorLogin string
-	PRNumber          int64
-	PRTitle           string
-	PRRequesterLogin  string
-	PRMerged          bool
-	PRMergedByLogin   string
+	FailedJobs            []FailedJob
+	CommitAuthorLogin     string
+	CommitAuthorAvatarURL string
+	PRNumber              int64
+	PRTitle               string
+	PRRequesterLogin      string
+	PRRequesterAvatarURL  string
+	PRMerged              bool
+	PRMergedByLogin       string
+}
+
+// OwnerAvatarURL returns the avatar of whoever "owns" this run: the PR
+// requester when the commit belongs to a pull request, otherwise the
+// commit author.
+func (d *RunDetails) OwnerAvatarURL() string {
+	if d == nil {
+		return ""
+	}
+	if d.PRNumber > 0 && d.PRRequesterAvatarURL != "" {
+		return d.PRRequesterAvatarURL
+	}
+	return d.CommitAuthorAvatarURL
 }
 
 type FailedJob struct {
@@ -86,6 +101,7 @@ func (c *AppClient) FetchRunDetails(ctx context.Context, repoFullName string, ru
 	}
 	if commit.Author != nil {
 		details.CommitAuthorLogin = commit.Author.Login
+		details.CommitAuthorAvatarURL = commit.Author.AvatarURL
 	}
 
 	var pulls []pullSummary
@@ -98,6 +114,7 @@ func (c *AppClient) FetchRunDetails(ctx context.Context, repoFullName string, ru
 		details.PRNumber = p.Number
 		details.PRTitle = p.Title
 		details.PRRequesterLogin = p.User.Login
+		details.PRRequesterAvatarURL = p.User.AvatarURL
 
 		if p.MergedAt != nil {
 			var pd pullDetail
@@ -192,7 +209,8 @@ type commitResponse struct {
 }
 
 type ghUser struct {
-	Login string `json:"login"`
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 type pullSummary struct {
